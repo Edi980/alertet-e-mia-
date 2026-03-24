@@ -4,7 +4,6 @@ import time
 import requests
 import logging
 import threading
-import yfinance as yf
 from flask import Flask, request, render_template_string, redirect
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
@@ -34,32 +33,39 @@ def send_telegram(message):
         return r.status_code == 200
     except: return False
 
+def get_yahoo_price(symbol):
+    """Merr çmimin direkt nga Yahoo duke u maskuar si Google Chrome"""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1m"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            return float(data['chart']['result'][0]['meta']['regularMarketPrice'])
+    except Exception as e:
+        logging.error(f"Gabim Yahoo ({symbol}): {e}")
+    return None
+
 def get_market_prices():
     prices = {}
     
-    # 1. BTC (Binance)
+    # 1. BTC (Nga Binance)
     try:
         r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
         if r.status_code == 200: prices["BTC"] = float(r.json()["price"])
     except: pass
 
-    # 2. XAU (Gold Futures)
-    try:
-        prices["XAU"] = yf.Ticker("GC=F").fast_info['last_price']
-    except Exception as e:
-        logging.error(f"Gabim XAU: {e}")
-
-    # 3. NAS100 (Nasdaq Futures)
-    try:
-        prices["NAS100"] = yf.Ticker("NQ=F").fast_info['last_price']
-    except Exception as e:
-        logging.error(f"Gabim NAS100: {e}")
-
-    # 4. US30 (Dow Futures)
-    try:
-        prices["US30"] = yf.Ticker("YM=F").fast_info['last_price']
-    except Exception as e:
-        logging.error(f"Gabim US30: {e}")
+    # 2. Të tjerat (Nga Yahoo me Maskim)
+    xau = get_yahoo_price("GC=F")
+    if xau: prices["XAU"] = xau
+    
+    nas = get_yahoo_price("NQ=F")
+    if nas: prices["NAS100"] = nas
+    
+    us30 = get_yahoo_price("YM=F")
+    if us30: prices["US30"] = us30
     
     global live_prices
     live_prices.update(prices)
@@ -114,7 +120,7 @@ HTML_PAGE = """
         .tag { padding: 3px 8px; border-radius: 3px; color: white; font-weight: bold; font-size: 12px; }
         .bg-xau { background-color: #f39c12; } .bg-btc { background-color: #f1c40f; color: black; }
         .bg-us30 { background-color: #2980b9; } .bg-nas100 { background-color: #8e44ad; }
-        .prices { display: flex; gap: 15px; margin-bottom: 20px; }
+        .prices { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
         .price-card { background: #fff; padding: 10px 20px; border-radius: 5px; border-left: 4px solid #333; box-shadow: 0 2px 4px rgba(0,0,0,0.1); font-size: 14px;}
     </style>
 </head>
