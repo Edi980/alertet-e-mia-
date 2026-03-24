@@ -36,19 +36,30 @@ def send_telegram(message):
 
 def get_market_prices():
     prices = {}
+    
+    # 1. BTC (Binance)
     try:
         r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
         if r.status_code == 200: prices["BTC"] = float(r.json()["price"])
     except: pass
 
+    # 2. XAU (Gold Futures)
     try:
-        # NQ=F (Nasdaq Futures), YM=F (Dow Futures), XAUUSD=X (Gold)
-        tickers = yf.Tickers("XAUUSD=X YM=F NQ=F")
-        prices["XAU"] = tickers.tickers["XAUUSD=X"].fast_info['last_price']
-        prices["US30"] = tickers.tickers["YM=F"].fast_info['last_price']
-        prices["NAS100"] = tickers.tickers["NQ=F"].fast_info['last_price']
+        prices["XAU"] = yf.Ticker("GC=F").fast_info['last_price']
     except Exception as e:
-        logging.error(f"Gabim Yahoo Finance: {e}")
+        logging.error(f"Gabim XAU: {e}")
+
+    # 3. NAS100 (Nasdaq Futures)
+    try:
+        prices["NAS100"] = yf.Ticker("NQ=F").fast_info['last_price']
+    except Exception as e:
+        logging.error(f"Gabim NAS100: {e}")
+
+    # 4. US30 (Dow Futures)
+    try:
+        prices["US30"] = yf.Ticker("YM=F").fast_info['last_price']
+    except Exception as e:
+        logging.error(f"Gabim US30: {e}")
     
     global live_prices
     live_prices.update(prices)
@@ -104,7 +115,7 @@ HTML_PAGE = """
         .bg-xau { background-color: #f39c12; } .bg-btc { background-color: #f1c40f; color: black; }
         .bg-us30 { background-color: #2980b9; } .bg-nas100 { background-color: #8e44ad; }
         .prices { display: flex; gap: 15px; margin-bottom: 20px; }
-        .price-card { background: #fff; padding: 10px 20px; border-radius: 5px; border-left: 4px solid #333; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .price-card { background: #fff; padding: 10px 20px; border-radius: 5px; border-left: 4px solid #333; box-shadow: 0 2px 4px rgba(0,0,0,0.1); font-size: 14px;}
     </style>
 </head>
 <body>
