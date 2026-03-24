@@ -1,18 +1,1 @@
-[
-  {
-    "id": 1700000001,
-    "a": "XAU",
-    "d": "above",
-    "p": "3300.00",
-    "n": "Resistance kryesore",
-    "t": false
-  },
-  {
-    "id": 1700000002,
-    "a": "BTC",
-    "d": "below",
-    "p": "80000.00",
-    "n": "Support zone",
-    "t": false
-  }
-]
+[]
