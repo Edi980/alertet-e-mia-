@@ -51,13 +51,10 @@ def get_yahoo_price(symbol):
 def get_market_prices():
     prices = {}
     
-    # 1. BTC (Nga Binance)
-    try:
-        r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
-        if r.status_code == 200: prices["BTC"] = float(r.json()["price"])
-    except: pass
+    # Të gjitha asetet i marrim nga Yahoo me maskim!
+    btc = get_yahoo_price("BTC-USD")
+    if btc: prices["BTC"] = btc
 
-    # 2. Të tjerat (Nga Yahoo me Maskim)
     xau = get_yahoo_price("GC=F")
     if xau: prices["XAU"] = xau
     
