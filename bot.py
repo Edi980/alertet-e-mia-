@@ -4,6 +4,7 @@ import time
 import requests
 import logging
 import threading
+import yfinance as yf
 from flask import Flask, request, render_template_string, redirect
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
@@ -14,7 +15,6 @@ CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", "30"))
 ALERTS_FILE = "alerts.json"
 
 app = Flask(__name__)
-triggered = set()
 
 # ── FUNKSIONET BAZË ─────────────────────────────────
 def load_alerts():
@@ -40,37 +40,54 @@ def send_telegram(message):
     except:
         return False
 
-def get_xau_price():
-    """Merr çmimin vetëm për XAU për thjeshtësi, pasi JSON-i duket i orientuar nga Gold"""
+def get_market_prices():
+    """Merr çmimet për BTC (nga Binance) dhe XAU, US30, NAS100 (nga Yahoo Finance)"""
+    prices = {}
+    
+    # 1. Kripto nga Binance (Ultra e saktë, pa vonesa)
     try:
-        r = requests.get("https://api.metals.live/v1/spot", timeout=10)
+        r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
         if r.status_code == 200:
-            for item in r.json():
-                if item.get("gold"):
-                    return float(item["gold"])
-    except:
-        pass
-    return None
+            prices["BTC"] = float(r.json()["price"])
+    except Exception as e:
+        logging.error(f"Gabim Binance BTC: {e}")
+
+    # 2. Asetet e tjera nga Yahoo Finance (Shumë afër IC Markets)
+    try:
+        # XAUUSD=X (Gold), ^DJI (Dow Jones/US30), ^IXIC (Nasdaq/NAS100)
+        tickers = yf.Tickers("XAUUSD=X ^DJI ^IXIC")
+        prices["XAU"] = tickers.tickers["XAUUSD=X"].fast_info['last_price']
+        prices["US30"] = tickers.tickers["^DJI"].fast_info['last_price']
+        prices["NAS100"] = tickers.tickers["^IXIC"].fast_info['last_price']
+    except Exception as e:
+        logging.error(f"Gabim Yahoo Finance: {e}")
+
+    return prices
 
 # ── LOGJIKA E BOTIT NË PRAPASKENË ───────────────────
 def background_checker():
     logging.info("🚀 Gjurmuesi i çmimeve filloi në prapaskenë!")
-    send_telegram("✅ <b>Boti u rindez dhe po gjurmon çmimet!</b>")
+    send_telegram("✅ <b>Boti u rindez dhe po gjurmon tregun (XAU, BTC, US30, NAS100)!</b>")
     
     while True:
         try:
             alerts = load_alerts()
             if alerts:
-                current_price = get_xau_price()
-                if current_price:
+                prices = get_market_prices()
+                if prices:
                     updated = False
                     for alert in alerts:
                         if alert.get("t"): # Nëse është goditur (hit), kaloje
                             continue
                             
+                        asset = alert["a"]
                         target = float(alert["p"])
                         direction = alert["d"]
+                        current_price = prices.get(asset)
                         
+                        if not current_price:
+                            continue
+
                         hit = False
                         if direction == "above" and current_price >= target:
                             hit = True
@@ -79,7 +96,7 @@ def background_checker():
 
                         if hit:
                             msg = (f"⚡ <b>ALARM I GODITUR!</b>\n\n"
-                                   f"Tregu: <b>XAU/USD</b>\n"
+                                   f"Tregu: <b>{asset}</b>\n"
                                    f"Çmimi Aktual: <b>${current_price:,.2f}</b>\n"
                                    f"Targeti: ${target:,.2f}\n\n"
                                    f"📝 Shënimi: {alert['n']}")
@@ -102,14 +119,19 @@ HTML_PAGE = """
     <title>Shto Analizën (JSON)</title>
     <style>
         body { font-family: Arial; padding: 20px; background-color: #f4f4f9; }
-        textarea { width: 100%; height: 300px; padding: 10px; border-radius: 5px; border: 1px solid #ccc; }
+        textarea { width: 100%; height: 300px; padding: 10px; border-radius: 5px; border: 1px solid #ccc; font-family: monospace; }
         button { padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin-top: 10px; }
         button:hover { background-color: #218838; }
         .alert-box { background: white; padding: 15px; margin-top: 20px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .tag { padding: 3px 8px; border-radius: 3px; color: white; font-weight: bold; font-size: 12px; }
+        .bg-xau { background-color: #f39c12; }
+        .bg-btc { background-color: #f1c40f; color: black; }
+        .bg-us30 { background-color: #2980b9; }
+        .bg-nas100 { background-color: #8e44ad; }
     </style>
 </head>
 <body>
-    <h2>Gjurmuesi i Alarmeve</h2>
+    <h2>Gjurmuesi i Alarmeve ICT/SMC</h2>
     <form method="POST" action="/process_json">
         <label><b>Bëj paste JSON-in e Mapuesit këtu:</b></label><br>
         <textarea name="json_data" placeholder='{"strategic_bias": "sell", ...}' required></textarea><br>
@@ -121,10 +143,13 @@ HTML_PAGE = """
         <ul>
             {% for a in alerts %}
                 {% if not a.t %}
-                    <li><b>{{ a.p }}</b> - {{ a.n }} (Drejtimi: {{ a.d }})</li>
+                    <li>
+                        <span class="tag bg-{{ a.a | lower }}">{{ a.a }}</span> 
+                        <b>{{ a.p }}</b> - {{ a.n }} (Drejtimi: {{ a.d }})
+                    </li>
                 {% endif %}
             {% endfor %}
-            {% if not alerts %}<li>Nuk ka alarme aktive.</li>{% endif %}
+            {% if not alerts %}<li>Nuk ka alarme aktive. Bëj paste JSON-in më lart.</li>{% endif %}
         </ul>
     </div>
 </body>
@@ -141,9 +166,22 @@ def process_json():
     raw_data = request.form.get("json_data", "")
     try:
         data = json.loads(raw_data)
+        text_data = raw_data.upper()
+        
+        # 1. Zbulimi Automatik i Asetit nga teksti i JSON
+        asset = "XAU" # Default
+        if "BTC" in text_data or "BITCOIN" in text_data: 
+            asset = "BTC"
+        elif "US30" in text_data or "DOW" in text_data: 
+            asset = "US30"
+        elif "NAS100" in text_data or "NASDAQ" in text_data or "USTEC" in text_data: 
+            asset = "NAS100"
+        elif "XAU" in text_data or "GOLD" in text_data: 
+            asset = "XAU"
+
         new_alerts = []
         
-        # Ekstrakto alarmet nga "key_zones"
+        # 2. Ekstrakto alarmet nga "key_zones"
         if "key_zones" in data:
             for zone in data["key_zones"]:
                 zone_id = zone.get("id", "ZONË E PANJOHUR")
@@ -151,46 +189,40 @@ def process_json():
                 activation_price = zone.get("anchor_price")
                 dol_price = zone.get("tp1")
                 
-                # 1. Alarmi i Aktivizimit (Activation)
+                # Alarmi i Aktivizimit (Activation)
                 if activation_price:
-                    # Nëse presim të shesim, çmimi duhet të ngjitet ("above") drejt rezistencës
                     trigger_dir = "above" if direction == "sell" else "below" 
                     new_alerts.append({
                         "id": int(time.time() * 1000),
-                        "a": "XAU",
+                        "a": asset,
                         "d": trigger_dir,
                         "p": str(activation_price),
-                        "n": f"🔔 ACTIVATION: {zone_id} ({zone.get('zone_label')})",
+                        "n": f"🔔 ACTIVATION: {zone_id}",
                         "t": False
                     })
-                    time.sleep(0.1)
+                    time.sleep(0.01)
                 
-                # 2. Alarmi i Targetit (DOL)
+                # Alarmi i Targetit (DOL)
                 if dol_price:
-                    # Nëse po shesim, targeti goditet kur çmimi bie ("below")
                     trigger_dir = "below" if direction == "sell" else "above"
                     new_alerts.append({
                         "id": int(time.time() * 1000),
-                        "a": "XAU",
+                        "a": asset,
                         "d": trigger_dir,
                         "p": str(dol_price),
                         "n": f"🎯 DOL / TARGET: {zone_id} TP1",
                         "t": False
                     })
-                    time.sleep(0.1)
+                    time.sleep(0.01)
 
         save_alerts(new_alerts)
-        send_telegram("🔄 <b>Alarmet u përditësuan!</b>\nU lexua JSON-i i ri me sukses.")
+        send_telegram(f"🔄 <b>Alarmet u përditësuan!</b>\nAseti i zbuluar: {asset}")
         return redirect("/")
         
     except Exception as e:
         return f"<h3>Pati një gabim në leximin e JSON:</h3><p>{e}</p><a href='/'>Kthehu mbrapa</a>"
 
 if __name__ == "__main__":
-    # Fillon gjurmuesin në një thread të ndarë që të mos bllokojë faqen web
     threading.Thread(target=background_checker, daemon=True).start()
-    
-    # Fillon faqen web (Flask) për Render
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-
