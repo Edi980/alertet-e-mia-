@@ -34,7 +34,6 @@ def send_telegram(message):
     except: return False
 
 def get_yahoo_price(symbol):
-    """Merr çmimin direkt nga Yahoo duke u maskuar si Google Chrome"""
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1m"
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -51,7 +50,6 @@ def get_yahoo_price(symbol):
 def get_market_prices():
     prices = {}
     
-    # Të gjitha asetet i marrim nga Yahoo me maskim!
     btc = get_yahoo_price("BTC-USD")
     if btc: prices["BTC"] = btc
 
@@ -72,36 +70,39 @@ def background_checker():
     logging.info("🚀 Gjurmuesi filloi!")
     while True:
         try:
+            # TANI I MERR ÇMIMET GJITHMONË (që të mbushen kutitë lart)
+            prices = get_market_prices()
+            
             alerts = load_alerts()
-            if alerts:
-                prices = get_market_prices()
-                if prices:
-                    updated = False
-                    for alert in alerts:
-                        if alert.get("t"): continue
-                            
-                        asset = alert["a"]
-                        target = float(alert["p"])
-                        direction = alert["d"]
-                        current_price = prices.get(asset)
+            if alerts and prices:
+                updated = False
+                for alert in alerts:
+                    if alert.get("t"): continue
                         
-                        if not current_price: continue
+                    asset = alert["a"]
+                    target = float(alert["p"])
+                    direction = alert["d"]
+                    current_price = prices.get(asset)
+                    
+                    if not current_price: continue
 
-                        hit = False
-                        if direction == "above" and current_price >= target: hit = True
-                        elif direction == "below" and current_price <= target: hit = True
+                    hit = False
+                    if direction == "above" and current_price >= target: hit = True
+                    elif direction == "below" and current_price <= target: hit = True
 
-                        if hit:
-                            msg = (f"⚡ <b>ALARM I GODITUR!</b>\n\n"
-                                   f"Tregu: <b>{asset}</b>\n"
-                                   f"Çmimi Aktual: <b>${current_price:,.2f}</b>\n"
-                                   f"Targeti: ${target:,.2f}\n\n"
-                                   f"📝 Shënimi: {alert['n']}")
-                            if send_telegram(msg):
-                                alert["t"] = True
-                                updated = True
-                    if updated: save_alerts(alerts)
-        except Exception as e: pass
+                    if hit:
+                        msg = (f"⚡ <b>ALARM I GODITUR!</b>\n\n"
+                               f"Tregu: <b>{asset}</b>\n"
+                               f"Çmimi Aktual: <b>${current_price:,.2f}</b>\n"
+                               f"Targeti: ${target:,.2f}\n\n"
+                               f"📝 Shënimi: {alert['n']}")
+                        if send_telegram(msg):
+                            alert["t"] = True
+                            updated = True
+                if updated: save_alerts(alerts)
+        except Exception as e: 
+            logging.error(f"Gabim në gjurmues: {e}")
+            
         time.sleep(CHECK_INTERVAL)
 
 HTML_PAGE = """
@@ -144,7 +145,7 @@ HTML_PAGE = """
                     <li><span class="tag bg-{{ a.a | lower }}">{{ a.a }}</span> <b>{{ a.p }}</b> (Drejtimi: {{ a.d }}) - {{ a.n }}</li>
                 {% endif %}
             {% endfor %}
-            {% if not alerts %}<li>Nuk ka alarme aktive.</li>{% endif %}
+            {% if not alerts %}<li>Nuk ka alarme aktive. Bëj paste JSON-in për të filluar.</li>{% endif %}
         </ul>
     </div>
 </body>
