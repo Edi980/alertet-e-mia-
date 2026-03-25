@@ -35,9 +35,7 @@ def send_telegram(message):
 
 def get_yahoo_price(symbol):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1m"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     try:
         r = requests.get(url, headers=headers, timeout=5)
         if r.status_code == 200:
@@ -61,29 +59,65 @@ def get_market_prices():
     live_prices.update(prices)
     return prices
 
+def detect_asset_from_prices(data):
+    """
+    Zbulo assetin nga vlerat e çmimeve në JSON.
+    Rangjet nuk mbivendosen kurrë:
+      XAU    → 1000–9999
+      NAS100 → 10000–29999
+      US30   → 30000–59999
+      BTC    → 60000+
+    """
+    prices = []
+    for zone in data.get("key_zones", []):
+        for field in ["anchor_price", "tp1", "tp2", "zone_low", "zone_high"]:
+            try:
+                v = float(zone.get(field, 0) or 0)
+                if v > 100: prices.append(v)
+            except: pass
+    for alarm in data.get("alarms", []):
+        try:
+            v = float(alarm.get("trigger_price", 0) or 0)
+            if v > 100: prices.append(v)
+        except: pass
+    try:
+        v = float((data.get("feed_passthrough") or {}).get("current_price", 0) or 0)
+        if v > 100: prices.append(v)
+    except: pass
+
+    if not prices: return None
+    avg = sum(prices) / len(prices)
+
+    if avg < 10000: return "XAU"
+    elif avg < 30000: return "NAS100"
+    elif avg < 65000: return "US30"
+    else: return "BTC"
+
 def detect_asset(data, raw_text):
     VALID_ASSETS = {"XAU", "BTC", "US30", "NAS100"}
-    for field in ["asset", "symbol", "market", "instrument"]:
+
+    # 1. Fusha eksplicite në JSON
+    for field in ["asset", "symbol", "market", "instrument", "primary_asset"]:
         val = str(data.get(field, "")).upper().strip()
-        if val in VALID_ASSETS:
-            return val
+        if val in VALID_ASSETS: return val
         if val in ("XAUUSD", "GOLD", "GC=F", "GC"): return "XAU"
         if val in ("BTCUSD", "BITCOIN"): return "BTC"
         if val in ("US30", "DOW", "YM=F", "DJIA"): return "US30"
         if val in ("NAS100", "NASDAQ", "NQ=F", "USTEC", "US100"): return "NAS100"
+
+    # 2. Detektim nga vlerat e çmimeve — MË I SIGURT për mapuesin
+    asset_by_price = detect_asset_from_prices(data)
+    if asset_by_price:
+        logging.info(f"Asset i zbuluar nga çmimet: {asset_by_price}")
+        return asset_by_price
+
+    # 3. Fjalëkyçe në tekst (fallback)
     text_data = raw_text.upper()
-    if "BITCOIN" in text_data or "BTCUSD" in text_data or '"BTC"' in text_data:
-        return "BTC"
-    if "NAS100" in text_data or "NASDAQ" in text_data or "USTEC" in text_data or "US100" in text_data or "NQ=F" in text_data:
-        return "NAS100"
-    if '"US30"' in text_data or "'US30'" in text_data or ": US30" in text_data or "DOW" in text_data or "YM=F" in text_data or "DJIA" in text_data:
-        return "US30"
-    if "US30" in text_data and "XAUUSD" not in text_data:
-        return "US30"
-    if "XAUUSD" in text_data or "GOLD" in text_data or "GC=F" in text_data or '"XAU"' in text_data:
-        return "XAU"
-    if "BTC" in text_data:
-        return "BTC"
+    if "BITCOIN" in text_data or "BTCUSD" in text_data: return "BTC"
+    if "NAS100" in text_data or "NASDAQ" in text_data or "USTEC" in text_data or "NQ=F" in text_data: return "NAS100"
+    if "XAUUSD" in text_data or "GOLD" in text_data or "GC=F" in text_data: return "XAU"
+    if "DOW" in text_data or "YM=F" in text_data or "DJIA" in text_data: return "US30"
+    if "BTC" in text_data: return "BTC"
     return "XAU"
 
 def background_checker():
@@ -145,7 +179,6 @@ HTML_PAGE = """
     </div>
     <form method="POST" action="/process_json">
         <textarea name="json_data" placeholder='Bëj paste JSON-in...' required></textarea><br>
-        <p style="font-size:12px; color:#666;">💡 Këshillë: Shto <code>"asset": "XAU"</code> (ose US30, NAS100, BTC) në JSON-in tënd për zbulim të saktë.</p>
         <button type="submit">Krijo Alarmet</button>
     </form>
     <div class="box">
