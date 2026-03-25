@@ -49,47 +49,61 @@ def get_yahoo_price(symbol):
 
 def get_market_prices():
     prices = {}
-    
     btc = get_yahoo_price("BTC-USD")
     if btc: prices["BTC"] = btc
-
     xau = get_yahoo_price("GC=F")
     if xau: prices["XAU"] = xau
-    
     nas = get_yahoo_price("NQ=F")
     if nas: prices["NAS100"] = nas
-    
     us30 = get_yahoo_price("YM=F")
     if us30: prices["US30"] = us30
-    
     global live_prices
     live_prices.update(prices)
     return prices
+
+def detect_asset(data, raw_text):
+    VALID_ASSETS = {"XAU", "BTC", "US30", "NAS100"}
+    for field in ["asset", "symbol", "market", "instrument"]:
+        val = str(data.get(field, "")).upper().strip()
+        if val in VALID_ASSETS:
+            return val
+        if val in ("XAUUSD", "GOLD", "GC=F", "GC"): return "XAU"
+        if val in ("BTCUSD", "BITCOIN"): return "BTC"
+        if val in ("US30", "DOW", "YM=F", "DJIA"): return "US30"
+        if val in ("NAS100", "NASDAQ", "NQ=F", "USTEC", "US100"): return "NAS100"
+    text_data = raw_text.upper()
+    if "BITCOIN" in text_data or "BTCUSD" in text_data or '"BTC"' in text_data:
+        return "BTC"
+    if "NAS100" in text_data or "NASDAQ" in text_data or "USTEC" in text_data or "US100" in text_data or "NQ=F" in text_data:
+        return "NAS100"
+    if '"US30"' in text_data or "'US30'" in text_data or ": US30" in text_data or "DOW" in text_data or "YM=F" in text_data or "DJIA" in text_data:
+        return "US30"
+    if "US30" in text_data and "XAUUSD" not in text_data:
+        return "US30"
+    if "XAUUSD" in text_data or "GOLD" in text_data or "GC=F" in text_data or '"XAU"' in text_data:
+        return "XAU"
+    if "BTC" in text_data:
+        return "BTC"
+    return "XAU"
 
 def background_checker():
     logging.info("🚀 Gjurmuesi filloi!")
     while True:
         try:
-            # TANI I MERR ÇMIMET GJITHMONË (që të mbushen kutitë lart)
             prices = get_market_prices()
-            
             alerts = load_alerts()
             if alerts and prices:
                 updated = False
                 for alert in alerts:
                     if alert.get("t"): continue
-                        
                     asset = alert["a"]
                     target = float(alert["p"])
                     direction = alert["d"]
                     current_price = prices.get(asset)
-                    
                     if not current_price: continue
-
                     hit = False
                     if direction == "above" and current_price >= target: hit = True
                     elif direction == "below" and current_price <= target: hit = True
-
                     if hit:
                         msg = (f"⚡ <b>ALARM I GODITUR!</b>\n\n"
                                f"Tregu: <b>{asset}</b>\n"
@@ -100,9 +114,8 @@ def background_checker():
                             alert["t"] = True
                             updated = True
                 if updated: save_alerts(alerts)
-        except Exception as e: 
+        except Exception as e:
             logging.error(f"Gabim në gjurmues: {e}")
-            
         time.sleep(CHECK_INTERVAL)
 
 HTML_PAGE = """
@@ -124,19 +137,17 @@ HTML_PAGE = """
 </head>
 <body>
     <h2>Gjurmuesi i Alarmeve ICT/SMC</h2>
-    
     <div class="prices">
         <div class="price-card" style="border-color: #f39c12;"><b>XAU:</b> ${{ "{:,.2f}".format(prices.get('XAU', 0)) }}</div>
         <div class="price-card" style="border-color: #8e44ad;"><b>NAS100:</b> ${{ "{:,.2f}".format(prices.get('NAS100', 0)) }}</div>
         <div class="price-card" style="border-color: #2980b9;"><b>US30:</b> ${{ "{:,.2f}".format(prices.get('US30', 0)) }}</div>
         <div class="price-card" style="border-color: #f1c40f;"><b>BTC:</b> ${{ "{:,.2f}".format(prices.get('BTC', 0)) }}</div>
     </div>
-
     <form method="POST" action="/process_json">
         <textarea name="json_data" placeholder='Bëj paste JSON-in...' required></textarea><br>
+        <p style="font-size:12px; color:#666;">💡 Këshillë: Shto <code>"asset": "XAU"</code> (ose US30, NAS100, BTC) në JSON-in tënd për zbulim të saktë.</p>
         <button type="submit">Krijo Alarmet</button>
     </form>
-    
     <div class="box">
         <h3>Alarmet Aktive:</h3>
         <ul>
@@ -161,13 +172,8 @@ def process_json():
     raw_data = request.form.get("json_data", "")
     try:
         data = json.loads(raw_data)
-        text_data = raw_data.upper()
-        
-        asset = "XAU"
-        if "BTC" in text_data or "BITCOIN" in text_data: asset = "BTC"
-        elif "US30" in text_data or "DOW" in text_data: asset = "US30"
-        elif "NAS100" in text_data or "NASDAQ" in text_data or "USTEC" in text_data: asset = "NAS100"
-
+        asset = detect_asset(data, raw_data)
+        logging.info(f"Asset i zbuluar: {asset}")
         new_alerts = []
         if "key_zones" in data:
             for zone in data["key_zones"]:
@@ -175,17 +181,17 @@ def process_json():
                 direction = zone.get("direction", "sell")
                 act_price = zone.get("anchor_price")
                 dol_price = zone.get("tp1")
-                
                 if act_price:
                     new_alerts.append({"id": int(time.time()*1000), "a": asset, "d": "above" if direction == "sell" else "below", "p": str(act_price), "n": f"🔔 ACTIVATION: {zone_id}", "t": False})
                     time.sleep(0.01)
                 if dol_price:
                     new_alerts.append({"id": int(time.time()*1000)+1, "a": asset, "d": "below" if direction == "sell" else "above", "p": str(dol_price), "n": f"🎯 DOL: {zone_id}", "t": False})
-
         save_alerts(new_alerts)
-        send_telegram(f"🔄 <b>Alarmet u përditësuan!</b>\nAseti: {asset}")
+        logging.info(f"Alarmet u përditësuan: {len(new_alerts)} alarme për {asset}")
+        send_telegram(f"🔄 <b>Alarmet u përditësuan!</b>\nAseti: <b>{asset}</b>\nAlarme të reja: <b>{len(new_alerts)}</b>")
         return redirect("/")
     except Exception as e:
+        logging.error(f"Gabim në process_json: {e}")
         return f"Gabim: {e}"
 
 if __name__ == "__main__":
